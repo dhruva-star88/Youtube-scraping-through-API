@@ -38,4 +38,23 @@ def get_video_ids(youtube, playlist_id):
         
     return video_ids
 
-print(get_video_ids(youtube, playlist_id))
+videoIds = get_video_ids(youtube, playlist_id)
+
+# To get Video Details
+def get_video_details(youtube, videoIds):
+    all_video_stats = []
+    # SInce youtube api takes only 50 requests at a time
+    for i in range(0, len(videoIds), 50):
+        request = youtube.videos().list(
+            part = 'snippet,statistics',
+            id = ','.join(videoIds[i:i + 50]) 
+        )
+        response = request.execute()
+        for video in response["items"]:
+            video_stas = dict(Title = video["snippet"]["title"])
+            
+            all_video_stats.append(video_stas)
+        
+    return all_video_stats
+
+print(get_video_details(youtube, videoIds))
