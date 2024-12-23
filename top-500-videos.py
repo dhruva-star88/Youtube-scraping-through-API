@@ -1,11 +1,33 @@
 import csv
 from googleapiclient.discovery import build
 from pytube import YouTube
+from datetime import datetime, timedelta
+import isodate 
+
 
 # Initialize YouTube API client
 API_KEY = "AIzaSyCLQt1n_--BRrbQ4rU60fk3f3uAkG3M3tA"
 youtube = build("youtube", "v3", developerKey=API_KEY)
 
+# Convert of duration from ISO format
+def convert_duration(iso_duration):
+    try:
+        duration = isodate.parse_duration(iso_duration)
+        total_seconds = int(duration.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return f"{hours:02}:{minutes:02}:{seconds:02}"
+    except Exception:
+        return "Invalid Duration"
+    
+def convert_published_at(iso_datetime):
+    try:
+        dt = datetime.fromisoformat(iso_datetime.replace("Z", "+00:00"))
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return "Invalid DateTime"
+    
+    
 def fetch_top_videos(genre, max_results=500):
     videos = []
     next_page_token = None
@@ -25,7 +47,8 @@ def fetch_top_videos(genre, max_results=500):
             title = item["snippet"]["title"]
             description = item["snippet"].get("description", "")
             channel_title = item["snippet"]["channelTitle"]
-            published_at = item["snippet"]["publishedAt"]
+            iso_published_at = item["snippet"].get("publishedAt", "")
+            published_at = convert_published_at(iso_published_at)
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             tags = item["snippet"].get("tags", [])
             category = item["snippet"].get("categoryId", "")
@@ -55,7 +78,7 @@ def get_video_details(video_ids):
     details = []
     for i in range(0, len(video_ids), 50):  # Process in batches of 50
         response = youtube.videos().list(
-            part="statistics,contentDetails,topicDetails,snippet",  # Ensure snippet and topicDetails are included
+            part="statistics,contentDetails,topicDetails,snippet,recordingDetails",  # Ensure snippet and topicDetails are included
             id=",".join(video_ids[i:i+50])
         ).execute()
         print("Details Data: ",response)
@@ -63,15 +86,16 @@ def get_video_details(video_ids):
             video_id = item["id"]
             view_count = item["statistics"].get("viewCount", 0)
             comment_count = item["statistics"].get("commentCount", 0)
-            duration = item["contentDetails"]["duration"]
+            iso_duration = item["contentDetails"]["duration"]
+            duration = convert_duration(iso_duration)
             captions_available = "true" if "caption" in item["contentDetails"] else "false"
             
             # Safely access topicDetails
             topic_details = item.get("topicDetails", {}).get("topicCategories", [])
 
             # Safely access snippet
-            snippet = item.get("snippet", {})
-            location = snippet.get("location", "N/A")
+            rec = item.get("recordingDetails", {})
+            location = rec.get("location", "N/A")
 
             details.append({
                 "Video ID": video_id,
@@ -107,7 +131,7 @@ def save_to_csv(videos, filename="videos.csv"):
     fieldnames = [
         "Video ID", "Title", "Description", "Channel Title", 
         "Video URL", "Tags", "Category", "Published At",
-        "View Count", "Comment Count", "Duration", 
+        "View Count", "Comment Count", "Duration","Topic Details", 
         "Captions Available", "Caption Text", "Location"
     ]
     
