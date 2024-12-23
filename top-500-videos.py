@@ -3,10 +3,12 @@ from googleapiclient.discovery import build
 from pytube import YouTube
 from datetime import datetime, timedelta
 import isodate 
+from geopy.geocoders import Nominatim
+import time
 
 
 # Initialize YouTube API client
-API_KEY = "AIzaSyCLQt1n_--BRrbQ4rU60fk3f3uAkG3M3tA"
+API_KEY = "AIzaSyDj2nEexA4kXcMvuc9ogSAO7TGzOdoD6CI"
 youtube = build("youtube", "v3", developerKey=API_KEY)
 
 # Convert of duration from ISO format
@@ -27,6 +29,16 @@ def convert_published_at(iso_datetime):
     except Exception:
         return "Invalid DateTime"
     
+# Initialize the geocoder
+geolocator = Nominatim(user_agent="youtube_video_location")
+
+# Convert latitude and longitude to a human-readable location
+def get_location_from_coordinates(latitude, longitude):
+    try:
+        location = geolocator.reverse((latitude, longitude), language='en')
+        return location.address if location else "Location not found"
+    except Exception as e:
+        return f"Error getting location: {str(e)}"
     
 def fetch_top_videos(genre, max_results=500):
     videos = []
@@ -93,9 +105,16 @@ def get_video_details(video_ids):
             # Safely access topicDetails
             topic_details = item.get("topicDetails", {}).get("topicCategories", [])
 
-            # Safely access snippet
-            rec = item.get("recordingDetails", {})
-            location = rec.get("location", "N/A")
+            # Get location from recording details (latitude and longitude)
+            recording_details = item.get("recordingDetails", {})
+            location = recording_details.get("location", "N/A")
+            
+            # If location contains latitude and longitude, reverse geocode
+            if location != "N/A" and isinstance(location, dict):
+                latitude = location.get("latitude")
+                longitude = location.get("longitude")
+                if latitude and longitude:
+                    location = get_location_from_coordinates(latitude, longitude)
 
             details.append({
                 "Video ID": video_id,
@@ -113,17 +132,42 @@ def get_video_details(video_ids):
 def fetch_captions(video_id):
     try:
         yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
-        captions = yt.captions.get_by_language_code("en")
-        if "en" in captions:  # Check for English captions
-            return captions["en"].generate_srt_captions()
+        captions = yt.captions  # Fetch captions object
+
+        if not captions:  # If no captions are available at all
+            return "No Captions Available"
         
-        # If no English captions, fetch the first available language
-        for code, caption in captions.items():
-            return caption.generate_srt_captions()
+        # Try fetching English captions
+        if "en" in captions:
+            caption = captions["en"]
+            caption_format = caption.format  # Get the caption format (srt, vtt, etc.)
+            if caption_format == "srt":
+                return caption.generate_srt_captions()  # SRT format
+            elif caption_format == "vtt":
+                return caption.generate_webvtt_captions()  # WebVTT format
+            elif caption_format == "xml":
+                return caption.generate_xml_captions()  # XML format
+            else:
+                return f"Captions available in {caption_format} format, but unsupported format"
         
-        return "No Captions Available"
+        # Fallback: If English captions aren't available, check for other languages
+        for caption in captions.all():
+            caption_format = caption.format  # Get the caption format (srt, vtt, etc.)
+            if caption_format == "srt":
+                return caption.generate_srt_captions()
+            elif caption_format == "vtt":
+                return caption.generate_webvtt_captions()
+            elif caption_format == "xml":
+                return caption.generate_xml_captions()
+            else:
+                return f"Captions available in {caption_format} format, but unsupported format"
+        
+        return "No Captions Available"  # If no captions in any language
+
     except Exception as e:
         return f"Error fetching captions: {str(e)}"
+
+
 
 
 def save_to_csv(videos, filename="videos.csv"):
@@ -150,6 +194,7 @@ def save_to_csv(videos, filename="videos.csv"):
 
 
 def main():
+    start_time = time.time()
     genre = input("Enter the genre (e.g., 'science-fiction'): ")
     max_results = 500  # Change this to the number of videos you want to fetch
 
@@ -171,8 +216,13 @@ def main():
 
     # Save all the collected data to a CSV file
     save_to_csv(videos)
+    end_time = time.time()
+    
+    runtime = end_time - start_time  # runtime in seconds
+    runtime_minutes = runtime / 60 
 
     print(f"Data saved to video_details.csv with {len(videos)} videos.")
+    print(f"Runtime: {runtime_minutes: .2f} minutes")
 
 
 if __name__ == "__main__":
