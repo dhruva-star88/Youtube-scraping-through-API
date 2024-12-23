@@ -1,5 +1,6 @@
 import csv
 from googleapiclient.discovery import build
+from pytube import YouTube
 
 # Initialize YouTube API client
 API_KEY = "AIzaSyCLQt1n_--BRrbQ4rU60fk3f3uAkG3M3tA"
@@ -18,7 +19,7 @@ def fetch_top_videos(genre, max_results=500):
             order="viewCount",  # Sort by popularity
             pageToken=next_page_token
         ).execute()
-
+        print("Fetched Data: ",response)
         for item in response.get("items", []):
             video_id = item["id"]["videoId"]
             title = item["snippet"]["title"]
@@ -57,13 +58,13 @@ def get_video_details(video_ids):
             part="statistics,contentDetails,topicDetails,snippet",  # Ensure snippet and topicDetails are included
             id=",".join(video_ids[i:i+50])
         ).execute()
-
+        print("Details Data: ",response)
         for item in response.get("items", []):
             video_id = item["id"]
             view_count = item["statistics"].get("viewCount", 0)
             comment_count = item["statistics"].get("commentCount", 0)
             duration = item["contentDetails"]["duration"]
-            captions_available = item["contentDetails"].get("caption", "false")
+            captions_available = "true" if "caption" in item["contentDetails"] else "false"
             
             # Safely access topicDetails
             topic_details = item.get("topicDetails", {}).get("topicCategories", [])
@@ -85,14 +86,29 @@ def get_video_details(video_ids):
     return details
 
 
+def fetch_captions(video_id):
+    try:
+        yt = YouTube(f"https://www.youtube.com/watch?v={video_id}")
+        captions = yt.captions.get_by_language_code("en")
+        if "en" in captions:  # Check for English captions
+            return captions["en"].generate_srt_captions()
+        
+        # If no English captions, fetch the first available language
+        for code, caption in captions.items():
+            return caption.generate_srt_captions()
+        
+        return "No Captions Available"
+    except Exception as e:
+        return f"Error fetching captions: {str(e)}"
+
 
 def save_to_csv(videos, filename="videos.csv"):
     # Define the field names for the CSV file
     fieldnames = [
         "Video ID", "Title", "Description", "Channel Title", 
-        "Keyword Tags", "YouTube Video Category", "Topic Details", 
-        "Video Published at", "Video Duration", "View Count", 
-        "Comment Count", "Captions Available", "Caption Text", "Location"
+        "Video URL", "Tags", "Category", "Published At",
+        "View Count", "Comment Count", "Duration", 
+        "Captions Available", "Caption Text", "Location"
     ]
     
     # Open the file and write the data
@@ -126,6 +142,8 @@ def main():
     for i, video in enumerate(videos):
         if i < len(video_details):
             video.update(video_details[i])
+            if video.get("Captions Available") == "true":
+                video["Caption Text"] = fetch_captions(video["Video ID"])
 
     # Save all the collected data to a CSV file
     save_to_csv(videos)
